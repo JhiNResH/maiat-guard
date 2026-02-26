@@ -1,0 +1,36 @@
+{
+  "name": "@maiat/viem-guard",
+  "version": "0.1.0",
+  "description": "Universal trust middleware for viem — auto-checks Maiat trust score before every transaction",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "viem",
+    "ethereum",
+    "base",
+    "trust",
+    "security",
+    "web3",
+    "maiat"
+  ],
+  "author": "JhiNResH",
+  "license": "MIT",
+  "peerDependencies": {
+    "viem": ">=2.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "viem": "^2.46.3"
+  }
+}
