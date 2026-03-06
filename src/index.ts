@@ -30,6 +30,13 @@ export interface MaiatTrustOptions {
    * Called when mode='warn' and address is low-trust.
    */
   onWarn?: (result: MaiatCheckResult) => void
+
+  /**
+   * If true, record transaction outcomes back to Maiat after every sendTransaction.
+   * Requires apiKey to be set (outcome endpoint is authenticated).
+   * @default false
+   */
+  recordOutcomes?: boolean
 }
 
 /**
@@ -40,11 +47,40 @@ export interface MaiatTrustOptions {
  * const client = withMaiatTrust(walletClient, { minScore: 60 })
  * await client.sendTransaction({ to: '0x...', value: parseEther('1') })
  */
+const MAIAT_API = 'https://maiat-protocol.vercel.app'
+
+/**
+ * Fire-and-forget outcome recording after a transaction.
+ * Never throws — outcome recording should never break the main flow.
+ */
+function recordOutcome(
+  agentAddress: string,
+  outcome: 'success' | 'failure',
+  apiKey: string,
+  txHash?: string
+): void {
+  fetch(`${MAIAT_API}/api/v1/outcome`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Maiat-Key': apiKey,
+    },
+    body: JSON.stringify({
+      jobId: txHash ?? `guard-${Date.now()}`,
+      agentAddress,
+      outcome,
+      source: 'maiat-guard',
+    }),
+  }).catch(() => {
+    // Silent — outcome recording must never break the main tx flow
+  })
+}
+
 export function withMaiatTrust<T extends WalletClient>(
   client: T,
   opts: MaiatTrustOptions = {}
 ): T {
-  const { minScore = 60, apiKey, mode = 'block', onWarn } = opts
+  const { minScore = 60, apiKey, mode = 'block', onWarn, recordOutcomes = false } = opts
 
   if (mode === 'silent') return client
 
@@ -73,8 +109,21 @@ export function withMaiatTrust<T extends WalletClient>(
   return client.extend((c: any) => ({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     async sendTransaction(args: any) {
-      await gate(args.to as string | undefined)
-      return c.sendTransaction(args)
+      const to = args.to as string | undefined
+      await gate(to)
+
+      try {
+        const txHash = await c.sendTransaction(args)
+        if (recordOutcomes && apiKey && to) {
+          recordOutcome(to, 'success', apiKey, txHash as string)
+        }
+        return txHash
+      } catch (err) {
+        if (recordOutcomes && apiKey && to) {
+          recordOutcome(to, 'failure', apiKey)
+        }
+        throw err
+      }
     },
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
