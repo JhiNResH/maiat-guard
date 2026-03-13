@@ -1,37 +1,27 @@
 import type { WalletClient } from 'viem';
-import { type MaiatCheckResult } from './errors.js';
-export { MaiatTrustError } from './errors.js';
-export type { MaiatCheckResult } from './errors.js';
-export interface MaiatTrustOptions {
-    /**
-     * Block transactions to addresses with trust score below this threshold.
-     * @default 60
-     */
-    minScore?: number;
-    /**
-     * Maiat API key for paid tier (no rate limit).
-     * Without key: free tier, 10 req/min per IP.
-     */
-    apiKey?: string;
-    /**
-     * How to handle low-trust addresses.
-     * - 'block'  → throws MaiatTrustError (default)
-     * - 'warn'   → calls onWarn(), tx continues
-     * - 'silent' → no check, passthrough
-     */
-    mode?: 'block' | 'warn' | 'silent';
-    /**
-     * Called when mode='warn' and address is low-trust.
-     */
-    onWarn?: (result: MaiatCheckResult) => void;
-}
+import type { MaiatTrustOptions } from './types.js';
+export { MaiatTrustError, MaiatPoisonError } from './types.js';
+export type { MaiatCheckResult, MaiatTrustOptions, SignedScore, AntiPoisonConfig, ThreatReport } from './types.js';
+export { checkTrust } from './trust-check.js';
+export { fetchSignedScore, encodeSwapHookData } from './hook-data.js';
+export { detectVanityMatch } from './anti-poison.js';
+export { reportThreat } from './report-threat.js';
+export { createMaiatAgentWallet } from './agent-wallet.js';
 /**
  * Wraps a viem WalletClient to auto-check Maiat trust score
  * before every sendTransaction / writeContract call.
  *
+ * v0.2.0 adds: anti-poisoning, threat reporting, TrustGateHook hookData support.
+ *
  * @example
- * const client = withMaiatTrust(walletClient, { minScore: 60 })
+ * ```ts
+ * const client = withMaiatTrust(walletClient, {
+ *   minScore: 60,
+ *   antiPoison: true,
+ *   reportThreats: true,
+ * })
  * await client.sendTransaction({ to: '0x...', value: parseEther('1') })
+ * ```
  */
 export declare function withMaiatTrust<T extends WalletClient>(client: T, opts?: MaiatTrustOptions): T;
 //# sourceMappingURL=index.d.ts.map
