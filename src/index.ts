@@ -1,57 +1,23 @@
 import type { WalletClient } from 'viem'
 import { checkTrust } from './trust-check.js'
-import { MaiatTrustError, type MaiatCheckResult } from './errors.js'
+import { antiPoisonGate } from './anti-poison.js'
+import { reportThreat } from './report-threat.js'
+import type { MaiatTrustOptions, MaiatCheckResult, AntiPoisonConfig } from './types.js'
+import { MaiatTrustError, MaiatPoisonError } from './types.js'
 
-export { MaiatTrustError } from './errors.js'
-export type { MaiatCheckResult } from './errors.js'
+// Re-exports
+export { MaiatTrustError, MaiatPoisonError } from './types.js'
+export type { MaiatCheckResult, MaiatTrustOptions, SignedScore, AntiPoisonConfig, ThreatReport } from './types.js'
+export { checkTrust } from './trust-check.js'
+export { fetchSignedScore, encodeSwapHookData } from './hook-data.js'
+export { detectVanityMatch } from './anti-poison.js'
+export { reportThreat } from './report-threat.js'
+export { createMaiatAgentWallet } from './agent-wallet.js'
 
-export interface MaiatTrustOptions {
-  /**
-   * Block transactions to addresses with trust score below this threshold.
-   * @default 60
-   */
-  minScore?: number
-
-  /**
-   * Maiat API key for paid tier (no rate limit).
-   * Without key: free tier, 10 req/min per IP.
-   */
-  apiKey?: string
-
-  /**
-   * How to handle low-trust addresses.
-   * - 'block'  → throws MaiatTrustError (default)
-   * - 'warn'   → calls onWarn(), tx continues
-   * - 'silent' → no check, passthrough
-   */
-  mode?: 'block' | 'warn' | 'silent'
-
-  /**
-   * Called when mode='warn' and address is low-trust.
-   */
-  onWarn?: (result: MaiatCheckResult) => void
-
-  /**
-   * If true, record transaction outcomes back to Maiat after every sendTransaction.
-   * Requires apiKey to be set (outcome endpoint is authenticated).
-   * @default false
-   */
-  recordOutcomes?: boolean
-}
-
-/**
- * Wraps a viem WalletClient to auto-check Maiat trust score
- * before every sendTransaction / writeContract call.
- *
- * @example
- * const client = withMaiatTrust(walletClient, { minScore: 60 })
- * await client.sendTransaction({ to: '0x...', value: parseEther('1') })
- */
 const MAIAT_API = 'https://maiat-protocol.vercel.app'
 
 /**
  * Fire-and-forget outcome recording after a transaction.
- * Never throws — outcome recording should never break the main flow.
  */
 function recordOutcome(
   agentAddress: string,
@@ -71,22 +37,87 @@ function recordOutcome(
       outcome,
       source: 'maiat-guard',
     }),
-  }).catch(() => {
-    // Silent — outcome recording must never break the main tx flow
-  })
+  }).catch(() => {})
 }
 
+/**
+ * Wraps a viem WalletClient to auto-check Maiat trust score
+ * before every sendTransaction / writeContract call.
+ *
+ * v0.2.0 adds: anti-poisoning, threat reporting, TrustGateHook hookData support.
+ *
+ * @example
+ * ```ts
+ * const client = withMaiatTrust(walletClient, {
+ *   minScore: 60,
+ *   antiPoison: true,
+ *   reportThreats: true,
+ * })
+ * await client.sendTransaction({ to: '0x...', value: parseEther('1') })
+ * ```
+ */
 export function withMaiatTrust<T extends WalletClient>(
   client: T,
   opts: MaiatTrustOptions = {}
 ): T {
-  const { minScore = 60, apiKey, mode = 'block', onWarn, recordOutcomes = false } = opts
+  const {
+    minScore = 60,
+    apiKey,
+    mode = 'block',
+    onWarn,
+    recordOutcomes: enableOutcomes = false,
+    antiPoison = false,
+    reportThreats = true,
+  } = opts
 
   if (mode === 'silent') return client
+
+  // Resolve anti-poison config
+  const poisonConfig: AntiPoisonConfig | null = antiPoison
+    ? (typeof antiPoison === 'object' ? antiPoison : { vanityMatch: true, livenessCheck: true })
+    : null
 
   async function gate(address: string | undefined): Promise<void> {
     if (!address) return
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const walletAddress = (client as any).account?.address as string | undefined
+
+    // 1. Anti-poisoning checks (before trust check — cheaper to fail fast)
+    if (poisonConfig) {
+      try {
+        await antiPoisonGate(address, walletAddress, poisonConfig)
+      } catch (err) {
+        if (err instanceof MaiatPoisonError) {
+          // Report threat
+          if (reportThreats) {
+            reportThreat(
+              address,
+              err.threatType === 'vanity_match' ? 'vanity_match' : 'dust_liveness',
+              {
+                matchedAddress: err.matchedAddress,
+                threatType: err.threatType,
+              },
+              apiKey
+            )
+          }
+          if (mode === 'block') throw err
+          if (mode === 'warn') {
+            onWarn?.({
+              address,
+              score: 0,
+              riskLevel: 'High',
+              verdict: 'block',
+              source: 'fallback',
+            })
+            return
+          }
+        }
+        // Other errors → fail-open
+      }
+    }
+
+    // 2. Trust score check
     const result = await checkTrust(address, apiKey)
 
     // null = unknown address or API error → fail-open
@@ -95,6 +126,16 @@ export function withMaiatTrust<T extends WalletClient>(
     const isLowTrust = result.verdict === 'block' || result.score < minScore
 
     if (!isLowTrust) return
+
+    // Report low-trust threat
+    if (reportThreats) {
+      reportThreat(
+        address,
+        'low_trust',
+        { score: result.score, riskLevel: result.riskLevel, verdict: result.verdict },
+        apiKey
+      )
+    }
 
     if (mode === 'block') {
       throw new MaiatTrustError(result)
@@ -114,12 +155,12 @@ export function withMaiatTrust<T extends WalletClient>(
 
       try {
         const txHash = await c.sendTransaction(args)
-        if (recordOutcomes && apiKey && to) {
+        if (enableOutcomes && apiKey && to) {
           recordOutcome(to, 'success', apiKey, txHash as string)
         }
         return txHash
       } catch (err) {
-        if (recordOutcomes && apiKey && to) {
+        if (enableOutcomes && apiKey && to) {
           recordOutcome(to, 'failure', apiKey)
         }
         throw err
