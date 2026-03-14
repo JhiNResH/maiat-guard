@@ -14,7 +14,7 @@ export { detectVanityMatch } from './anti-poison.js'
 export { reportThreat } from './report-threat.js'
 export { createMaiatAgentWallet } from './agent-wallet.js'
 
-const MAIAT_API = 'https://maiat-protocol.vercel.app'
+const MAIAT_API = 'https://app.maiat.io'
 
 /**
  * Fire-and-forget outcome recording after a transaction.

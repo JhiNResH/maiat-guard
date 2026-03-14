@@ -1,6 +1,6 @@
 import type { ThreatReport } from './types.js'
 
-const MAIAT_API = 'https://maiat-protocol.vercel.app'
+const MAIAT_API = 'https://app.maiat.io'
 const GUARD_VERSION = '0.2.0'
 
 /**

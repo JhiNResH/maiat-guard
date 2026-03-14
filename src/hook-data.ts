@@ -1,6 +1,6 @@
 import type { SignedScore } from './types.js'
 
-const MAIAT_API = 'https://maiat-protocol.vercel.app'
+const MAIAT_API = 'https://app.maiat.io'
 const TIMEOUT_MS = 3000
 
 /**
