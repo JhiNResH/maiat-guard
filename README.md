@@ -1,6 +1,6 @@
-# @maiat/viem-guard
+# @maiat/viem-guard v0.2.0
 
-> Universal trust middleware for viem — automatically checks Maiat trust score before every transaction.
+> Agentic trust layer for viem — trust scoring, anti-poisoning, TrustGateHook integration, and threat reporting.
 
 ## Install
 
@@ -8,92 +8,141 @@
 npm install @maiat/viem-guard viem
 ```
 
-## Usage
+## Quick Start
 
 ```ts
 import { createWalletClient, http, parseEther } from 'viem'
 import { base } from 'viem/chains'
 import { withMaiatTrust } from '@maiat/viem-guard'
 
-const walletClient = createWalletClient({
-  account,
-  chain: base,
-  transport: http(),
-})
-
-// Wrap with Maiat trust gate
 const client = withMaiatTrust(walletClient, {
-  minScore: 60,  // block if trust score < 60 (default)
+  minScore: 60,
+  antiPoison: true,       // detect address poisoning
+  reportThreats: true,    // auto-report to Maiat network
 })
 
-// All transactions now auto-checked
 await client.sendTransaction({
   to: '0xSomeContract',
   value: parseEther('1'),
 })
-// ^ auto-calls GET /api/v1/trust-check?agent=0xSomeContract
-// score < 60 → throws MaiatTrustError
-// score ≥ 60 → tx proceeds normally
+```
+
+## Agent Wallet (Privy / EIP-1193)
+
+One-line integration for AI agent wallets:
+
+```ts
+import { createMaiatAgentWallet } from '@maiat/viem-guard'
+
+const wallet = createMaiatAgentWallet(privyProvider, {
+  minScore: 70,
+  antiPoison: true,
+  apiKey: 'mk_...',
+})
+
+// All transactions: trust-gated + anti-poisoned + threat-reported
+await wallet.sendTransaction({ to, value })
+```
+
+## TrustGateHook Integration (Uniswap V4)
+
+Fetch EIP-712 signed scores for TrustGateHook-protected pools:
+
+```ts
+import { fetchSignedScore, encodeSwapHookData } from '@maiat/viem-guard'
+
+// Fetch signed trust scores for both tokens
+const score0 = await fetchSignedScore('0xToken0Address')
+const score1 = await fetchSignedScore('0xToken1Address')
+
+if (score0 && score1) {
+  const hookData = encodeSwapHookData(myAddress, score0, score1)
+  // Pass hookData to your Uniswap V4 swap transaction
+}
+```
+
+## Anti-Poisoning Engine
+
+Detects address poisoning attacks before they happen:
+
+- **Vanity Match Detection**: Scans wallet history for addresses with matching first4+last4 hex chars
+- **Liveness Check**: Flags accounts created <24h ago with dust-only transactions
+
+```ts
+const client = withMaiatTrust(walletClient, {
+  antiPoison: {
+    vanityMatch: true,
+    livenessCheck: true,
+    etherscanApiKey: 'YOUR_KEY',
+    explorerUrl: 'https://api.basescan.org/api',
+  },
+})
 ```
 
 ## Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `minScore` | `number` | `60` | Block transactions to addresses below this trust score |
-| `apiKey` | `string` | - | `mk_...` key for paid tier (no rate limit) |
-| `mode` | `'block' \| 'warn' \| 'silent'` | `'block'` | How to handle low-trust addresses |
-| `onWarn` | `(result) => void` | - | Called when `mode='warn'` and address is low-trust |
+| `minScore` | `number` | `60` | Block if trust score below threshold |
+| `apiKey` | `string` | - | `mk_...` key for paid tier |
+| `mode` | `'block' \| 'warn' \| 'silent'` | `'block'` | How to handle low-trust |
+| `onWarn` | `(result) => void` | - | Called in warn mode |
+| `recordOutcomes` | `boolean` | `false` | Record tx outcomes to Maiat |
+| `antiPoison` | `boolean \| AntiPoisonConfig` | `false` | Enable anti-poisoning |
+| `reportThreats` | `boolean` | `true` | Auto-report threats to network |
+| `routerAddresses` | `string[]` | - | Uniswap V4 router addresses |
+| `feeTarget` | `string` | - | Address for fee discount |
 
-## Modes
-
-```ts
-// block (default) — throws MaiatTrustError
-const client = withMaiatTrust(walletClient, { mode: 'block' })
-
-// warn — logs warning, tx continues
-const client = withMaiatTrust(walletClient, {
-  mode: 'warn',
-  onWarn: (result) => console.warn(`Low trust: ${result.address} (${result.score}/100)`),
-})
-
-// silent — disables all checks (for testing)
-const client = withMaiatTrust(walletClient, { mode: 'silent' })
-```
-
-## Error handling
+## Error Handling
 
 ```ts
-import { withMaiatTrust, MaiatTrustError } from '@maiat/viem-guard'
+import { withMaiatTrust, MaiatTrustError, MaiatPoisonError } from '@maiat/viem-guard'
 
 try {
   await client.sendTransaction({ to: '0x...', value: parseEther('1') })
 } catch (e) {
+  if (e instanceof MaiatPoisonError) {
+    console.log(e.threatType)      // 'vanity_match' | 'dust_liveness'
+    console.log(e.matchedAddress)  // the real address being impersonated
+  }
   if (e instanceof MaiatTrustError) {
-    console.log(e.address)  // blocked address
-    console.log(e.score)    // 0-100
-    console.log(e.verdict)  // 'block'
+    console.log(e.score)           // 0-100
+    console.log(e.verdict)         // 'block'
   }
 }
 ```
 
-## What gets intercepted
+## Collective Immunity
 
-| tx.to | Trust check |
-|-------|-------------|
-| DeFi protocol | Protocol trust score |
-| Agent wallet | ACP seller reputation |
-| NFT contract | Contract safety |
-| ERC-20 token | Token trust score |
+When Guard blocks an attack, it automatically reports the malicious address to the Maiat network (privacy-safe — no sender context). Every Maiat-protected agent gets instant protection.
 
-Both `sendTransaction` and `writeContract` are intercepted. Unknown addresses (not in Maiat DB) are **allowed through** (fail-open).
+```
+Agent A blocks attack → Report to Maiat → Global TrustScore update → All agents immunized
+```
 
-## Rate limits
+## Exports
 
-| Tier | Limit | How |
-|------|-------|-----|
-| Free | 10 req/min per IP | Default, no setup |
-| Paid | Unlimited | `apiKey: 'mk_...'` |
+```ts
+// Core
+export { withMaiatTrust } from '@maiat/viem-guard'
+export { createMaiatAgentWallet } from '@maiat/viem-guard'
+
+// Hook Data
+export { fetchSignedScore, encodeSwapHookData } from '@maiat/viem-guard'
+
+// Anti-Poisoning
+export { detectVanityMatch } from '@maiat/viem-guard'
+
+// Threat Reporting
+export { reportThreat } from '@maiat/viem-guard'
+
+// Trust Check
+export { checkTrust } from '@maiat/viem-guard'
+
+// Types & Errors
+export { MaiatTrustError, MaiatPoisonError } from '@maiat/viem-guard'
+export type { MaiatCheckResult, SignedScore, AntiPoisonConfig, ThreatReport } from '@maiat/viem-guard'
+```
 
 ## Powered by
 
