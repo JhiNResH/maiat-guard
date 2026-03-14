@@ -1,7 +1,7 @@
 {
   "name": "@maiat/viem-guard",
-  "version": "0.2.0",
-  "description": "Agentic trust layer for viem — trust scoring, anti-poisoning, TrustGateHook integration, and threat reporting",
+  "version": "0.1.0",
+  "description": "Universal trust middleware for viem — auto-checks Maiat trust score before every transaction",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -1,4 +1,4 @@
-import type { MaiatCheckResult } from './types.js'
+import type { MaiatCheckResult } from './errors.js'
 
 const MAIAT_API = 'https://maiat-protocol.vercel.app'
 const TIMEOUT_MS = 2000
@@ -7,10 +7,6 @@ const TIMEOUT_MS = 2000
 const cache = new Map<string, { result: MaiatCheckResult; expiresAt: number }>()
 const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
 
-/**
- * Check trust score for an address via Maiat Protocol API.
- * Uses GET /api/v1/agent/{address} (canonical endpoint).
- */
 export async function checkTrust(
   address: string,
   apiKey?: string
@@ -33,38 +29,22 @@ export async function checkTrust(
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
 
     const res = await fetch(
-      `${MAIAT_API}/api/v1/agent/${lowerAddr}`,
+      `${MAIAT_API}/api/v1/trust-check?agent=${lowerAddr}`,
       { headers, signal: controller.signal }
     ).finally(() => clearTimeout(timer))
 
-    // 404 = not in DB → fail-open
+    // 404 or unknown = not in DB → fail-open
     if (res.status === 404 || res.status === 402) return null
+
     if (!res.ok) return null
 
     const json = await res.json()
-
-    // Map verdict: proceed → allow, caution → review, avoid → block
-    let verdict: 'allow' | 'review' | 'block' = 'allow'
-    if (json.verdict === 'avoid') verdict = 'block'
-    else if (json.verdict === 'caution') verdict = 'review'
-    else if (json.verdict === 'block') verdict = 'block'
-    else if (json.verdict === 'review') verdict = 'review'
-
-    const score = json.trustScore ?? json.score ?? 0
-
-    // Derive riskLevel from score
-    let riskLevel: 'Low' | 'Medium' | 'High' | 'Unknown' = 'Unknown'
-    if (score >= 70) riskLevel = 'Low'
-    else if (score >= 40) riskLevel = 'Medium'
-    else if (score > 0) riskLevel = 'High'
-
     const result: MaiatCheckResult = {
       address: lowerAddr,
-      score,
-      riskLevel,
-      verdict,
+      score: json.score ?? json.trustScore ?? 0,
+      riskLevel: json.riskLevel ?? 'Unknown',
+      verdict: json.verdict ?? 'allow',
       source: 'api',
-      breakdown: json.breakdown,
     }
 
     cache.set(lowerAddr, { result, expiresAt: Date.now() + CACHE_TTL_MS })

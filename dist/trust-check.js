@@ -3,10 +3,6 @@ const TIMEOUT_MS = 2000;
 // Simple in-memory cache: address → { result, expiresAt }
 const cache = new Map();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-/**
- * Check trust score for an address via Maiat Protocol API.
- * Uses GET /api/v1/agent/{address} (canonical endpoint).
- */
 export async function checkTrust(address, apiKey) {
     if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address))
         return null;
@@ -22,39 +18,19 @@ export async function checkTrust(address, apiKey) {
             headers['X-Maiat-Key'] = apiKey;
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-        const res = await fetch(`${MAIAT_API}/api/v1/agent/${lowerAddr}`, { headers, signal: controller.signal }).finally(() => clearTimeout(timer));
-        // 404 = not in DB → fail-open
+        const res = await fetch(`${MAIAT_API}/api/v1/trust-check?agent=${lowerAddr}`, { headers, signal: controller.signal }).finally(() => clearTimeout(timer));
+        // 404 or unknown = not in DB → fail-open
         if (res.status === 404 || res.status === 402)
             return null;
         if (!res.ok)
             return null;
         const json = await res.json();
-        // Map verdict: proceed → allow, caution → review, avoid → block
-        let verdict = 'allow';
-        if (json.verdict === 'avoid')
-            verdict = 'block';
-        else if (json.verdict === 'caution')
-            verdict = 'review';
-        else if (json.verdict === 'block')
-            verdict = 'block';
-        else if (json.verdict === 'review')
-            verdict = 'review';
-        const score = json.trustScore ?? json.score ?? 0;
-        // Derive riskLevel from score
-        let riskLevel = 'Unknown';
-        if (score >= 70)
-            riskLevel = 'Low';
-        else if (score >= 40)
-            riskLevel = 'Medium';
-        else if (score > 0)
-            riskLevel = 'High';
         const result = {
             address: lowerAddr,
-            score,
-            riskLevel,
-            verdict,
+            score: json.score ?? json.trustScore ?? 0,
+            riskLevel: json.riskLevel ?? 'Unknown',
+            verdict: json.verdict ?? 'allow',
             source: 'api',
-            breakdown: json.breakdown,
         };
         cache.set(lowerAddr, { result, expiresAt: Date.now() + CACHE_TTL_MS });
         return result;
