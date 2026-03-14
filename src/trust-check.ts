@@ -1,6 +1,6 @@
 import type { MaiatCheckResult } from './errors.js'
 
-const MAIAT_API = 'https://maiat-protocol.vercel.app'
+const MAIAT_API = 'https://app.maiat.io'
 const TIMEOUT_MS = 2000
 
 // Simple in-memory cache: address → { result, expiresAt }

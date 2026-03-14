@@ -47,7 +47,7 @@ export interface MaiatTrustOptions {
  * const client = withMaiatTrust(walletClient, { minScore: 60 })
  * await client.sendTransaction({ to: '0x...', value: parseEther('1') })
  */
-const MAIAT_API = 'https://maiat-protocol.vercel.app'
+const MAIAT_API = 'https://app.maiat.io'
 
 /**
  * Fire-and-forget outcome recording after a transaction.
