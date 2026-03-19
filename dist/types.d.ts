@@ -95,5 +95,20 @@ export interface MaiatTrustOptions {
      * @default true
      */
     reportThreats?: boolean;
+    /**
+     * Enable token safety checks on swap transactions.
+     * Detects Uniswap V2/V3/V4 swaps and checks output token safety.
+     * @default true
+     */
+    tokenGuard?: boolean;
+    /**
+     * Minimum token safety score to allow a swap (0-100).
+     * @default 40
+     */
+    minTokenScore?: number;
+    /**
+     * Called when mode='warn' and a swap target token is dangerous.
+     */
+    onTokenWarn?: (result: import('./token-guard.js').TokenCheckResult) => void;
 }
 //# sourceMappingURL=types.d.ts.map

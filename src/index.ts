@@ -2,6 +2,7 @@ import type { WalletClient } from 'viem'
 import { checkTrust } from './trust-check.js'
 import { antiPoisonGate } from './anti-poison.js'
 import { reportThreat } from './report-threat.js'
+import { isSwapTransaction, extractTokenOut, checkToken, MaiatTokenError } from './token-guard.js'
 import type { MaiatTrustOptions, MaiatCheckResult, AntiPoisonConfig } from './types.js'
 import { MaiatTrustError, MaiatPoisonError } from './types.js'
 
@@ -9,12 +10,14 @@ import { MaiatTrustError, MaiatPoisonError } from './types.js'
 export { MaiatTrustError, MaiatPoisonError } from './types.js'
 export type { MaiatCheckResult, MaiatTrustOptions, SignedScore, AntiPoisonConfig, ThreatReport } from './types.js'
 export { checkTrust } from './trust-check.js'
+export { checkToken, isSwapTransaction, extractTokenOut, MaiatTokenError, addRouter } from './token-guard.js'
+export type { TokenCheckResult } from './token-guard.js'
 export { fetchSignedScore, encodeSwapHookData } from './hook-data.js'
 export { detectVanityMatch } from './anti-poison.js'
 export { reportThreat } from './report-threat.js'
 export { createMaiatAgentWallet } from './agent-wallet.js'
 
-const MAIAT_API = 'https://maiat-protocol.vercel.app'
+const MAIAT_API = 'https://app.maiat.io'
 
 /**
  * Fire-and-forget outcome recording after a transaction.
@@ -68,6 +71,9 @@ export function withMaiatTrust<T extends WalletClient>(
     recordOutcomes: enableOutcomes = false,
     antiPoison = false,
     reportThreats = true,
+    tokenGuard = true,
+    minTokenScore = 40,
+    onTokenWarn,
   } = opts
 
   if (mode === 'silent') return client
@@ -152,6 +158,36 @@ export function withMaiatTrust<T extends WalletClient>(
     async sendTransaction(args: any) {
       const to = args.to as string | undefined
       await gate(to)
+
+      // Token guard: if this is a swap, check output token safety
+      if (tokenGuard && to && isSwapTransaction(to)) {
+        const data = args.data as string | undefined
+        const tokenOut = extractTokenOut(data)
+        if (tokenOut) {
+          const tokenResult = await checkToken(tokenOut, apiKey)
+          if (tokenResult) {
+            const isDangerous = tokenResult.verdict === 'danger' ||
+              tokenResult.isHoneypot ||
+              tokenResult.score < minTokenScore
+            if (isDangerous) {
+              if (reportThreats) {
+                reportThreat(tokenOut, 'low_trust', {
+                  tokenScore: tokenResult.score,
+                  riskFlags: tokenResult.riskFlags,
+                  isHoneypot: tokenResult.isHoneypot,
+                  type: 'token_swap_blocked',
+                }, apiKey)
+              }
+              if (mode === 'block') {
+                throw new MaiatTokenError(tokenResult)
+              }
+              if (mode === 'warn') {
+                onTokenWarn?.(tokenResult)
+              }
+            }
+          }
+        }
+      }
 
       try {
         const txHash = await c.sendTransaction(args)

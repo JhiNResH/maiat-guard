@@ -3,6 +3,8 @@ import type { MaiatTrustOptions } from './types.js';
 export { MaiatTrustError, MaiatPoisonError } from './types.js';
 export type { MaiatCheckResult, MaiatTrustOptions, SignedScore, AntiPoisonConfig, ThreatReport } from './types.js';
 export { checkTrust } from './trust-check.js';
+export { checkToken, isSwapTransaction, extractTokenOut, MaiatTokenError, addRouter } from './token-guard.js';
+export type { TokenCheckResult } from './token-guard.js';
 export { fetchSignedScore, encodeSwapHookData } from './hook-data.js';
 export { detectVanityMatch } from './anti-poison.js';
 export { reportThreat } from './report-threat.js';
