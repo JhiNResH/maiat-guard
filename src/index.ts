@@ -16,6 +16,8 @@ export { fetchSignedScore, encodeSwapHookData } from './hook-data.js'
 export { detectVanityMatch } from './anti-poison.js'
 export { reportThreat } from './report-threat.js'
 export { createMaiatAgentWallet } from './agent-wallet.js'
+export { withMaiatAcp, MaiatAcpError } from './acp-wrap.js'
+export type { AcpWrapOptions, AcpJobLike, AcpClientLike } from './acp-wrap.js'
 
 const MAIAT_API = 'https://app.maiat.io'
 

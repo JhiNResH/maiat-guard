@@ -9,6 +9,8 @@ export { fetchSignedScore, encodeSwapHookData } from './hook-data.js';
 export { detectVanityMatch } from './anti-poison.js';
 export { reportThreat } from './report-threat.js';
 export { createMaiatAgentWallet } from './agent-wallet.js';
+export { withMaiatAcp, MaiatAcpError } from './acp-wrap.js';
+export type { AcpWrapOptions, AcpJobLike, AcpClientLike } from './acp-wrap.js';
 /**
  * Wraps a viem WalletClient to auto-check Maiat trust score
  * before every sendTransaction / writeContract call.
